@@ -1,0 +1,14 @@
+# 在仓库根目录 E:\RoboMaster 下运行 train.py 时使用（相对当前工作目录）
+train: dataset/train/images
+val: dataset/valid/images
+test: dataset/test/images
+
+nc: 12
+names: ['B1', 'B2', 'B3', 'B4', 'B5', 'Bs', 'R1', 'R2', 'R3', 'R4', 'R5', 'Rs']
+
+roboflow:
+  workspace: hit-as62s
+  project: armors-700
+  version: 2
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/hit-as62s/armors-700/dataset/2
