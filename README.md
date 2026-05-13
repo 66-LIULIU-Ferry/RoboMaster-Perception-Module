@@ -1,183 +1,189 @@
-# RoboMaster 装甲板检测 / 关键点（YOLOv7 系）使用说明
+# RoboMaster Armor Detection / Keypoints (YOLOv7-style)
 
-本仓库基于 YOLOv7 系代码，支持 **装甲板目标检测**（如 12 类）、**装甲板四点关键点**、能量机关等配置。以下步骤默认在 **仓库根目录** 下执行（克隆本仓库后 `cd` 到该目录即可）。
+## About This Repository
 
----
-
-## 目录结构（常用）
-
-| 路径 | 说明 |
-|------|------|
-| `train.py` | 训练入口 |
-| `detect.py` | 图片 / 视频 / 摄像头推理 |
-| `export.py` | 导出 ONNX / TorchScript 等 |
-| `demo_webcam.py` | 摄像头实时检测 + PnP + 卡尔曼（可选 JSON/UDP） |
-| `dataset/data.yaml` | 数据集配置（路径、`nc`、`names`） |
-| `dataset/train/images`、`dataset/train/labels` | 训练集图片与 YOLO 标签 |
-| `dataset/valid/`、`dataset/test/` | 验证集 / 测试集 |
-| `cfg/armor_detect_12.yaml` | 12 类纯检测模型结构 |
-| `cfg/armor_keypoints_14.yaml` | 14 类四点关键点模型结构 |
-| `hyp/hyp.scratch.p5.yaml` 等 | 超参数 |
-| `runs/train/<实验名>/` | 训练输出（`weights/best.pt`、`results.txt` 等） |
-| `C++_inference_openvino_kpt/` | OpenVINO C++ 推理示例（需自行配置模型路径与类别数） |
+This repository is for **personal learning and practice** only—to get familiar with RoboMaster-style vision workflows (detection, export, simple deployment demos, etc.). It is **not** affiliated with any official team or competition.
 
 ---
 
-## 一、环境准备
+This project is based on YOLOv7-style code and supports **armor plate object detection** (e.g. 12 classes), **four-corner armor keypoints**, energy-target-style configs, and more. Unless stated otherwise, commands are run from the **repository root** (after cloning, `cd` into that directory).
 
-1. 安装 **Python 3.8+**（与 PyTorch 官方说明一致即可）。
-2. 安装 **PyTorch**（CUDA 版本需与本机显卡驱动匹配）。
-3. 进入项目目录，安装依赖（若仓库有 `requirements.txt` 则按文件安装；否则至少包含 `opencv-python`、`numpy`、`pyyaml`、`tqdm`、`matplotlib` 等，与训练报错提示补齐）。
+---
+
+## Repository Layout (common paths)
+
+| Path | Description |
+|------|-------------|
+| `train.py` | Training entry point |
+| `detect.py` | Inference on images / video / webcam |
+| `export.py` | Export ONNX / TorchScript, etc. |
+| `demo_webcam.py` | Live webcam: detection + PnP + Kalman (optional JSON/UDP) |
+| `dataset/data.yaml` | Dataset config (paths, `nc`, `names`) |
+| `dataset/train/images`, `dataset/train/labels` | Training images and YOLO labels |
+| `dataset/valid/`, `dataset/test/` | Validation / test splits |
+| `cfg/armor_detect_12.yaml` | 12-class detection-only model |
+| `cfg/armor_keypoints_14.yaml` | 14-class four-keypoint model |
+| `hyp/hyp.scratch.p5.yaml`, etc. | Hyperparameters |
+| `runs/train/<run_name>/` | Training outputs (`weights/best.pt`, `results.txt`, etc.) |
+| `C++_inference_openvino_kpt/` | OpenVINO C++ demo (configure model path, class count, etc.) |
+
+---
+
+## 1. Environment
+
+1. Install **Python 3.8+** (match PyTorch’s requirements).
+2. Install **PyTorch** (CUDA build must match your GPU driver).
+3. Enter the project directory and install dependencies (use `requirements.txt` if present; otherwise install at least `opencv-python`, `numpy`, `pyyaml`, `tqdm`, `matplotlib`, and anything else missing when you run training).
 
 ```powershell
-cd <你的仓库根目录>
-conda activate your_env   # 例如 yolov7
+cd <path-to-your-repo-root>
+conda activate your_env   # e.g. yolov7
 ```
 
 ---
 
-## 二、数据集准备
+## 2. Dataset
 
-1. **YOLO 格式**：每张图片对应同名 `labels/*.txt`，每行：`class x y w h`（归一化中心坐标与宽高）。
-2. 在 `dataset/data.yaml` 中配置：
-   - `train` / `val`：指向图片目录（相对仓库根目录）
-   - `nc`：类别数
-   - `names`：类别名列表，顺序与标签 id 一致
-3. 若类别数或顺序与官方示例不同，请同步修改 `cfg/` 中对应 yaml 的 `nc`，或保持与 `data.yaml` 一致。
+1. **YOLO format**: each image has a matching `labels/*.txt`; each line is `class x y w h` (normalized center and size).
+2. Configure `dataset/data.yaml`:
+   - `train` / `val`: image directories (paths relative to repo root)
+   - `nc`: number of classes
+   - `names`: class names in the same order as label IDs
+3. If class count or order differs from the bundled examples, update `nc` in the matching `cfg/*.yaml` or keep it consistent with `data.yaml`.
 
-关键点数据集格式见原仓库说明（装甲四点等需额外标注）。
+Keypoint dataset layout follows the original upstream README (armor four corners need extra labels).
 
 ---
 
-## 三、训练
+## 3. Training
 
-### 3.1 单卡训练（12 类装甲检测示例）
+### 3.1 Single-GPU (12-class armor detection example)
 
-`train.py` 中默认 `--cfg` / `--data` / `--hyp` 可能指向不存在的路径，**建议在命令行中显式写出本仓库实际路径**。
+Default `--cfg` / `--data` / `--hyp` in `train.py` may point to paths that do not exist in your tree—**pass explicit paths on the command line**.
 
 ```powershell
 python train.py --workers 8 --device 0 --batch-size 32 --data dataset/data.yaml --img-size 640 640 --cfg cfg/armor_detect_12.yaml --name armor12 --hyp hyp/hyp.scratch.p5.yaml --project runs/train
 ```
 
-说明：
+Notes:
 
-- **`--weights`**：不写表示从头训练；若需预训练权重，使用 `--weights yolov7.pt` 等（路径按你本地文件）。
-- **`--img-size`**：训练输入尺寸，需与后续推理、导出尽量一致。
-- **`--project`**：建议写 `runs/train`，避免默认路径指向仓库外。
-- **`--exist-ok`**：需要覆盖同一实验名时可加。
-- Windows 下若读 yaml 含中文注释，已在本仓库相关脚本中使用 **`encoding='utf-8'`** 打开；若仍报错，可设置环境变量 `PYTHONUTF8=1`。
+- **`--weights`**: omit to train from scratch; for pretrained weights use e.g. `--weights yolov7.pt` (path on your machine).
+- **`--img-size`**: should match inference/export as closely as possible.
+- **`--project`**: using `runs/train` avoids writing outside the repo by default.
+- **`--exist-ok`**: add if you want to reuse the same run name without auto-incrementing the folder name.
+- On Windows, YAML files with Chinese comments are opened with **`encoding='utf-8'`** in relevant scripts; if issues persist, set `PYTHONUTF8=1`.
 
-### 3.2 多卡分布式（Linux 常见）
+### 3.2 Multi-GPU (common on Linux)
 
 ```bash
-# 示例：4 卡；总 batch 需能被 GPU 数整除
-export USE_LIBUV=0   # Windows 下若遇到 libuv 报错可尝试
+# Example: 4 GPUs; total batch size must be divisible by GPU count
+export USE_LIBUV=0   # On Windows, try this if distributed init fails with libuv
 python -m torch.distributed.launch --nproc_per_node 4 --master_port 9527 train.py --workers 8 --device 0,1,2,3 --sync-bn --batch-size 128 --data dataset/data.yaml --img-size 640 640 --cfg cfg/armor_detect_12.yaml --name armor12 --hyp hyp/hyp.scratch.p5.yaml --project runs/train
 ```
 
-### 3.3 断点续训
+### 3.3 Resume training
 
 ```powershell
 python train.py --resume runs/train/armor12/weights/last.pt
 ```
 
-（具体以 `train.py` 中 `--resume` 逻辑为准。）
+(Exact behavior follows `train.py`’s `--resume` implementation.)
 
-### 3.4 训练产出
+### 3.4 Training outputs
 
-- **权重**：`runs/train/<name>/weights/best.pt`、`last.pt`
-- **曲线与指标**：同目录下 `results.txt`、`*.png` 等
+- **Weights**: `runs/train/<name>/weights/best.pt`, `last.pt`
+- **Curves / metrics**: `results.txt`, `*.png`, etc. in the same run folder
 
 ---
 
-## 四、推理测试
+## 4. Inference
 
-### 4.1 图片 / 视频 / 摄像头
+### 4.1 Images / video / webcam
 
-使用 `detect.py`，需指定 `--weights`，并与模型类型一致设置 **`--kpt-label`**（纯检测为 `False`，关键点为 `True`）。
+Use `detect.py` with `--weights` set. Match the model type with **`--kpt-label`** (`False` for detection-only, `True` for keypoint models).
 
 ```powershell
-# 图片或目录
+# Image or directory
 python detect.py --weights runs/train/armor12/weights/best.pt --source path/to/img.jpg --img-size 640 --device 0 --view-img --kpt-label False
 
-# 摄像头（source 为 0）
+# Webcam (device index 0)
 python detect.py --weights runs/train/armor12/weights/best.pt --source 0 --img-size 640 --device 0 --view-img --kpt-label False
 ```
 
-`--project`、`--name` 控制保存目录。
+`--project` and `--name` control where results are saved.
 
-### 4.2 摄像头实时演示（检测框 + 可选 PnP / 跟踪）
+### 4.2 Live webcam demo (bbox + optional PnP / tracking)
 
-`demo_webcam.py` 在纯检测模型下可用 **检测框四角** 近似参与 PnP（仅演示，非真实灯条角点）；关键点模型则使用网络输出的角点。
+For **detection-only** weights, `demo_webcam.py` can use **bounding-box corners** as a rough stand-in for PnP (demo only—not real light-bar corners). **Keypoint** models use network-predicted corners.
 
 ```powershell
 python demo_webcam.py --weights runs/train/armor12/weights/best.pt --img-size 640 --device 0
 ```
 
-常用参数：
+Useful flags:
 
-- `--calib`：相机标定 yaml（`camera_matrix`、`dist_coeffs`）
-- `--fov-deg` / `--fx`：无标定时的近似内参
-- `--max-missed`：检测丢失后卡尔曼预测框保持的帧数
-- `--stream-json` / `--udp`：向 stdout 或 UDP 输出 JSON（可选）
+- `--calib`: camera calibration YAML (`camera_matrix`, `dist_coeffs`)
+- `--fov-deg` / `--fx`: approximate intrinsics without a calib file
+- `--max-missed`: how many frames to keep a Kalman-predicted box after a missed detection
+- `--stream-json` / `--udp`: optional JSON telemetry to stdout or UDP
 
-按 **`q`** 退出窗口。
+Press **`q`** to quit the window.
 
 ---
 
-## 五、导出 ONNX（部署用）
+## 5. Export ONNX (deployment)
 
-训练得到的 `best.pt` 可通过 `export.py` 导出为 **ONNX**，便于 OpenVINO、ONNX Runtime、TensorRT 等使用。
+`export.py` converts `best.pt` to **ONNX** for OpenVINO, ONNX Runtime, TensorRT, etc.
 
-在仓库根目录执行：
+From the repository root:
 
 ```powershell
 python export.py --weights runs/train/armor12/weights/best.pt --img-size 640 640 --device 0
 ```
 
-说明：
+Notes:
 
-- 导出成功后在权重同目录生成 **`best.onnx`**（与 `export.py` 内逻辑一致）。
-- 需安装 **`onnx`**；若开启 simplify，需 **`onnx-simplifier`**。
-- **`--img-size`** 应与训练 / 部署输入一致。
-- 关键点模型导出时若使用 `--export-nms` 等选项，需阅读 `export.py` 内说明并与 `kpt_label` 一致。
-
----
-
-## 六、C++ OpenVINO 推理（可选）
-
-目录 `C++_inference_openvino_kpt/` 为 **Intel OpenVINO** 示例：需将 ONNX 转为 OpenVINO IR（`.xml` + `.bin`），并在 `yolov7_kpt.h` 中配置 **`MODEL_PATH`**、**`IMG_SIZE`**、**`CLS_NUM`**、**`KPT_NUM`**（纯检测为 0）及 **anchor** 与 `CMakeLists.txt` 中 OpenCV/OpenVINO 路径。
-
-纯检测模型无关键点时，可在 C++ 侧用 **检测框四角** 填充 `Object::kpt` 供后续 PnP（与 Python 思路一致）。
+- On success, **`best.onnx`** is written next to the weights (see `export.py` for details).
+- Requires **`onnx`**; optional simplify needs **`onnx-simplifier`**.
+- **`--img-size`** should match training / deployment.
+- For keypoint exports with `--export-nms` and similar, read `export.py` and keep `kpt_label` consistent.
 
 ---
 
-## 七、从训练到上车的推荐流程
+## 6. C++ OpenVINO (optional)
 
-1. 准备数据与 `dataset/data.yaml`、`cfg` 中 `nc` 一致。  
-2. 运行 `train.py`，得到 `best.pt`。  
-3. 用 `detect.py` 或 `demo_webcam.py` 在实拍环境验证。  
-4. 运行 `export.py` 得到 `best.onnx`。  
-5. 按车载方案选择 **ONNX Runtime / OpenVINO / TensorRT** 等，将后处理与电控通信对接。  
-6. 需要测距 / PnP 时，赛前完成 **相机标定**，在代码中加载 `camera_matrix` 与畸变系数。
+`C++_inference_openvino_kpt/` is an **Intel OpenVINO** sample: convert ONNX to IR (`.xml` + `.bin`), then set **`MODEL_PATH`**, **`IMG_SIZE`**, **`CLS_NUM`**, **`KPT_NUM`** (0 for detection-only), **anchors**, and OpenCV/OpenVINO paths in `yolov7_kpt.h` / `CMakeLists.txt`.
+
+For detection-only models with no keypoints, you can fill **`Object::kpt`** from **bbox corners** in C++ for downstream PnP (same idea as the Python demo).
 
 ---
 
-## 八、常见问题
+## 7. Suggested workflow: train → vehicle
 
-| 现象 | 处理建议 |
-|------|----------|
-| PowerShell 中 `--weights ""` 报错 | 去掉 `--weights`，或写成 `--weights ''`（等号形式） |
-| Windows 多卡 `libuv` 报错 | 先执行 `$env:USE_LIBUV="0"` 再启动 distributed |
-| 训练时 yaml 解码错误 | 保证 yaml 为 UTF-8；本仓库已对多处 `open` 使用 `encoding='utf-8'` |
-| `runs/train` 下出现 `armor12`、`armor122` 多个目录 | 同名实验未加 `--exist-ok` 时自动递增；覆盖可加 `--exist-ok` |
-| 检测框闪烁 | 使用 `demo_webcam.py` 中跟踪与卡尔曼；或提高置信度、改善光照/对焦 |
+1. Prepare data; keep `dataset/data.yaml` and `cfg` **`nc`** aligned.  
+2. Run `train.py` to obtain `best.pt`.  
+3. Validate with `detect.py` or `demo_webcam.py` in real imaging conditions.  
+4. Run `export.py` to get `best.onnx`.  
+5. Deploy with **ONNX Runtime / OpenVINO / TensorRT**, etc., and wire outputs to your robot middleware.  
+6. For ranging / PnP, **calibrate the camera** before competition and load `camera_matrix` and distortion in code.
 
 ---
 
-## 九、参考与许可
+## 8. Troubleshooting
 
-- 原始框架与数据集说明可参考仓库内原始作者说明及 RoboMaster 社区规范。  
-- 数据集若来自 Roboflow 等，请遵守对应许可证（见 `dataset/data.yaml` 中注释）。
+| Symptom | What to try |
+|---------|----------------|
+| `--weights ""` fails in PowerShell | Omit `--weights`, or use `--weights=''` |
+| Windows multi-GPU `libuv` error | Run `$env:USE_LIBUV="0"` before launching distributed training |
+| YAML `UnicodeDecodeError` | Save YAML as UTF-8; this repo opens many files with `encoding='utf-8'` |
+| Folders like `armor12`, `armor122` under `runs/train` | Auto-increment when the run name exists; add `--exist-ok` to overwrite |
+| Bounding box flicker | Use tracking/Kalman in `demo_webcam.py`; tune confidence; improve lighting / focus |
 
-如有问题，请结合本 README 与 `train.py`、`detect.py`、`export.py`、`demo_webcam.py` 内 `--help` 参数逐项核对。
+---
+
+## 9. References and licensing
+
+- Upstream framework and dataset notes may appear in the original author’s documentation and RoboMaster community guidelines.  
+- If data comes from Roboflow or similar sources, follow their license (see comments in `dataset/data.yaml`).
+
+For issues, cross-check this README with `train.py`, `detect.py`, `export.py`, and `demo_webcam.py` (`--help`).
